@@ -1,0 +1,5 @@
+[
+  {"external_id":"MOCK-001","email":"ava.meyer@example.test","first_name":"Ava","last_name":"Meyer","company":"Northstar Retail","phone":"+49-000-1001","updated_at":"2026-09-01T09:00:00Z"},
+  {"external_id":"MOCK-002","email":"leo.wagner@example.test","first_name":"Leo","last_name":"Wagner","company":"Harbor Systems OLD","phone":"+49-000-1002","updated_at":"2026-08-01T09:05:00Z"},
+  {"external_id":"MOCK-003","email":"mia.schulz@example.test","first_name":"Mia","last_name":"Schulz","company":"Clearview Labs","phone":"+49-000-1003","updated_at":"2026-09-01T09:10:00Z"}
+]
