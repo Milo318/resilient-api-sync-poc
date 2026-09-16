@@ -2,6 +2,8 @@ import unittest
 
 from api_sync.engine import SyncEngine, summarize
 from api_sync.mock_api import MockContactAPI
+from api_sync.autonomy import configure_and_canary_sync
+from api_sync.autonomous_benchmark import generate_cases
 
 
 def record(identifier: str, company: str = "Example") -> dict[str, object]:
@@ -33,6 +35,23 @@ class SyncTests(unittest.TestCase):
         bad["email"] = "not-an-email"
         events = SyncEngine(MockContactAPI([bad]), MockContactAPI([])).run()
         self.assertEqual(events[0].action, "rejected")
+
+    def test_ai_schema_mapping_passes_canary_without_approval(self) -> None:
+        case = generate_cases(1)[0]
+        outcome = configure_and_canary_sync(case.source_fields, case.samples, case.truth)
+        self.assertTrue(outcome.approved)
+        self.assertEqual(outcome.canary_records, 5)
+        self.assertFalse(outcome.manual_approval_required)
+
+    def test_invalid_ai_mapping_self_repairs(self) -> None:
+        case = generate_cases(2)[1]
+        outcome = configure_and_canary_sync(case.source_fields, case.samples, {"email": "missing"})
+        self.assertTrue(outcome.approved)
+        self.assertEqual(outcome.mapping, case.truth)
+        self.assertEqual(outcome.source, "deterministic_self_repair")
+
+    def test_autonomous_benchmark_has_120_schemas(self) -> None:
+        self.assertEqual(len(generate_cases(120)), 120)
 
 
 if __name__ == "__main__":

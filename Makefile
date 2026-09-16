@@ -1,4 +1,4 @@
-.PHONY: install test demo proof
+.PHONY: install test demo proof autonomy-proof
 install:
 	python3 -m pip install -e .
 test:
@@ -7,3 +7,5 @@ demo:
 	python3 -m api_sync.cli
 proof: test demo
 	python3 -m api_sync.benchmark
+autonomy-proof:
+	python3 -m api_sync.autonomous_benchmark --cases 120
