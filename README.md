@@ -6,6 +6,8 @@
 
 A proof of concept for safely synchronizing contact records between two API-style systems. It normalizes data, validates required fields, paginates records, retries transient failures, uses idempotency keys, and leaves a structured audit trail.
 
+**Public repository:** https://github.com/Milo318/resilient-api-sync-poc
+
 > **Data notice:** both API systems and every contact are deterministic mocks. Addresses use the reserved `.test` domain and do not identify real people or organizations.
 
 ## Proof of work
