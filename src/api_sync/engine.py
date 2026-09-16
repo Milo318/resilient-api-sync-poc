@@ -9,6 +9,17 @@ from .mock_api import MockContactAPI, TransientAPIError
 
 REQUIRED = {"external_id", "email", "first_name", "last_name", "company", "updated_at"}
 SYNC_FIELDS = ("external_id", "email", "first_name", "last_name", "company", "phone", "updated_at")
+MAPPING_FIELDS = SYNC_FIELDS[:-1]
+
+
+def normalize_values(record: dict[str, object], fields: tuple[str, ...]) -> dict[str, str]:
+    email = str(record["email"]).strip().lower()
+    if "@" not in email:
+        raise ValueError(f"Invalid email for {record.get('external_id', 'unknown')}")
+    return {
+        field: email if field == "email" else str(record.get(field, "")).strip()
+        for field in fields
+    }
 
 
 @dataclass(frozen=True)
@@ -31,13 +42,7 @@ class SyncEngine:
         missing = REQUIRED - record.keys()
         if missing:
             raise ValueError(f"Missing required fields: {sorted(missing)}")
-        email = str(record["email"]).strip().lower()
-        if "@" not in email:
-            raise ValueError(f"Invalid email for {record['external_id']}")
-        return {
-            field: (str(record.get(field, "")).strip() if field != "email" else email)
-            for field in SYNC_FIELDS
-        }
+        return normalize_values(record, SYNC_FIELDS)
 
     @staticmethod
     def fingerprint(record: dict[str, object]) -> str:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
+from .engine import MAPPING_FIELDS, normalize_values
 
-TARGET_FIELDS = ("external_id", "email", "first_name", "last_name", "company", "phone")
 ALIASES = {
     "external_id": ("id", "contact_id", "customer_ref", "record_key", "external_key"),
     "email": ("email", "email_address", "mail", "primary_email", "contact_email"),
@@ -24,11 +24,6 @@ class MappingOutcome:
     checks: tuple[str, ...]
     manual_approval_required: bool = False
 
-    def to_dict(self) -> dict[str, object]:
-        result = asdict(self)
-        result["checks"] = list(self.checks)
-        return result
-
 
 def deterministic_mapping(source_fields: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -40,23 +35,23 @@ def deterministic_mapping(source_fields: list[str]) -> dict[str, str]:
 
 
 def transform_record(record: dict[str, object], mapping: dict[str, str]) -> dict[str, str]:
-    transformed = {target: str(record[source]).strip() for target, source in mapping.items()}
-    transformed["email"] = transformed["email"].lower()
-    return transformed
+    return normalize_values({target: record[source] for target, source in mapping.items()}, MAPPING_FIELDS)
 
 
 def _mapping_valid(mapping: dict[str, str], source_fields: list[str]) -> bool:
-    return set(mapping) == set(TARGET_FIELDS) and len(set(mapping.values())) == len(TARGET_FIELDS) and all(source in source_fields for source in mapping.values())
+    return set(mapping) == set(MAPPING_FIELDS) and len(set(mapping.values())) == len(MAPPING_FIELDS) and all(source in source_fields for source in mapping.values())
 
 
 def configure_and_canary_sync(source_fields: list[str], samples: list[dict[str, object]], ai_mapping: dict[str, object] | None) -> MappingOutcome:
-    mapping = {str(target): str(source) for target, source in (ai_mapping or {}).items() if target in TARGET_FIELDS}
+    mapping = {str(target): str(source) for target, source in (ai_mapping or {}).items() if target in MAPPING_FIELDS}
     source = "ai"
     checks: list[str] = []
-    if not _mapping_valid(mapping, source_fields):
-        mapping = deterministic_mapping(source_fields)
+    deterministic = deterministic_mapping(source_fields)
+    deterministic_complete = _mapping_valid(deterministic, source_fields)
+    if not _mapping_valid(mapping, source_fields) or (deterministic_complete and mapping != deterministic):
+        mapping = deterministic
         source = "deterministic_self_repair"
-        checks.append("invalid_ai_mapping_repaired")
+        checks.append("invalid_or_conflicting_ai_mapping_repaired")
     canary_ok = _mapping_valid(mapping, source_fields)
     transformed: list[dict[str, str]] = []
     if canary_ok:

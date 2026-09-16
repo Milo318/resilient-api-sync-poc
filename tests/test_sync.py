@@ -50,8 +50,10 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(outcome.mapping, case.truth)
         self.assertEqual(outcome.source, "deterministic_self_repair")
 
-    def test_autonomous_benchmark_has_120_schemas(self) -> None:
-        self.assertEqual(len(generate_cases(120)), 120)
+    def test_autonomous_benchmark_has_200_schemas(self) -> None:
+        cases = generate_cases(200)
+        self.assertEqual(len(cases), 200)
+        self.assertEqual(sum(case.challenge != "standard" for case in cases), 100)
 
 
 if __name__ == "__main__":

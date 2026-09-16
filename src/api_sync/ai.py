@@ -18,7 +18,7 @@ def suggest_field_mapping(source_schema: list[str], target_schema: list[str], sa
         "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": "Return JSON mapping source field names to target field names. Never transform values and never invent fields."},
+            {"role": "system", "content": "Return JSON mapping each target field name to its source field name. Never transform values and never invent fields."},
             {"role": "user", "content": json.dumps(request_data, sort_keys=True)},
         ],
     }
@@ -28,6 +28,6 @@ def suggest_field_mapping(source_schema: list[str], target_schema: list[str], sa
     )
     with urllib.request.urlopen(request, timeout=45) as response:
         mapping = json.loads(json.load(response)["choices"][0]["message"]["content"])
-    if not all(source in source_schema and target in target_schema for source, target in mapping.items()):
+    if set(mapping) != set(target_schema) or not all(target in target_schema and source in source_schema for target, source in mapping.items()):
         raise ValueError(f"AI mapping failed schema validation: {mapping}")
     return mapping
