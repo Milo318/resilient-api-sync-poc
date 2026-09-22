@@ -4,8 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 
-class TransientAPIError(RuntimeError):
-    pass
+from .contracts import TransientAPIError
 
 
 @dataclass
@@ -18,7 +17,10 @@ class MockContactAPI:
     idempotency_log: set[str] = field(default_factory=set)
 
     def list_contacts(self, page_size: int = 100) -> list[list[dict[str, object]]]:
-        return [deepcopy(self.records[index : index + page_size]) for index in range(0, len(self.records), page_size)]
+        return [
+            deepcopy(self.records[index : index + page_size])
+            for index in range(0, len(self.records), page_size)
+        ]
 
     def upsert_contact(self, record: dict[str, object], idempotency_key: str) -> str:
         record_id = str(record["external_id"])

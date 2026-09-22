@@ -26,8 +26,12 @@ def main() -> None:
     parser.add_argument("--records", type=int, default=1000)
     parser.add_argument("--output", type=Path, default=Path("proof/benchmark.json"))
     args = parser.parse_args()
+    if args.records < 1:
+        parser.error("--records must be positive")
     source_records = [contact(index) for index in range(args.records)]
-    target_records = [contact(index, updated=index % 2 == 0) for index in range(args.records // 2)]
+    target_records = [
+        contact(index, updated=index % 2 == 0) for index in range(args.records // 2)
+    ]
     initial_target_count = len(target_records)
     transient_failures = {f"MOCK-{index:05d}" for index in range(0, args.records, 97)}
     target = MockContactAPI(target_records, fail_first_attempt_for=transient_failures)
@@ -46,8 +50,12 @@ def main() -> None:
         "processing_time_ms": round(elapsed * 1000, 3),
         "throughput_records_per_second": round(args.records / elapsed, 1),
         "failed_after_retries": summary["failed"],
-        "replay_writes": sum(event.action in {"created", "updated"} for event in replay_events),
-        "idempotent_replay_percent": 100.0 if all(event.action == "skipped" for event in replay_events) else 0.0,
+        "replay_writes": sum(
+            event.action in {"created", "updated"} for event in replay_events
+        ),
+        "idempotent_replay_percent": 100.0
+        if all(event.action == "skipped" for event in replay_events)
+        else 0.0,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

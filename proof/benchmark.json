@@ -11,8 +11,8 @@
   "retried": 8,
   "total": 1000,
   "final_target_records": 1000,
-  "processing_time_ms": 15.485,
-  "throughput_records_per_second": 64578.4,
+  "processing_time_ms": 915.216,
+  "throughput_records_per_second": 1092.6,
   "failed_after_retries": 0,
   "replay_writes": 0,
   "idempotent_replay_percent": 100.0

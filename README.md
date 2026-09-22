@@ -1,115 +1,68 @@
-# Autonomous API Mapping & Synchronization
+# Validated Contact Synchronization
 
-![Proof-of-work benchmark card](proof/portfolio-card.png)
+Synchronize contact records with explicit validation, idempotency and an audit trail.
 
-[![Proof](https://github.com/Milo318/resilient-api-sync-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/Milo318/resilient-api-sync-poc/actions/workflows/ci.yml)
+[![Quality](https://github.com/Milo318/resilient-api-sync-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/Milo318/resilient-api-sync-poc/actions/workflows/ci.yml)
 
-A proof of concept for safely synchronizing contact records between two API-style systems. It normalizes data, validates required fields, paginates records, retries transient failures, uses idempotency keys, and leaves a structured audit trail.
+## What the current implementation guarantees
 
-**Public repository:** https://github.com/Milo318/resilient-api-sync-poc
+- Separate the transport interface from the in-memory demo adapter.
+- Validate identities, contact fields, email shape and timezone-aware update timestamps.
+- Reject duplicate target identities before writing; record duplicate source IDs as rejected.
+- Retry transient failures with bounded exponential backoff and a stable idempotency key.
+- Require nonempty, valid canary records before approving a schema mapping.
+- Record created, updated, replayed, skipped, rejected and exhausted-retry outcomes.
 
-> **Data notice:** both API systems and every contact are deterministic mocks. Addresses use the reserved `.test` domain and do not identify real people or organizations.
+## Run
 
-## Autonomous AI proof
-
-The upgraded workflow lets a live model map unfamiliar source schemas to a canonical CRM contract. A deterministic validator enforces existing fields and one-to-one mappings, transforms five canary records, validates identity and email fields, and then promotes or rolls back the mapping automatically.
-
-The committed [live-model benchmark](proof/autonomous-benchmark.json) and [200 case-level decisions](proof/autonomous-cases.jsonl) were generated with `granite4.1:3b` through Ollama:
-
-> **How to read 100%:** the model alone mapped 165 of 200 schemas correctly. The final 200 of 200 result belongs to the complete system after structural validation, 35 automatic mapping repairs, and canary execution. Expected mappings are used for scoring only, not supplied to the runtime controller.
-
-| Autonomous acceptance check | Result |
-|---|---:|
-| Independent source schemas | 200 |
-| Raw AI mappings correct | 165 / 200 |
-| Automatic mapping repairs | 35 |
-| Distractor-field stress schemas | 100 / 100 approved |
-| Canary records transformed and validated | 1,000 |
-| Final machine-approved cases | 200 / 200 |
-| Final system approval rate | **100%** |
-| Human approvals | **0** |
-
-```bash
-python -m api_sync.autonomous_benchmark --cases 200 --model granite4.1:3b
-```
-
-Reproduction requires a running Ollama service with the selected model installed.
-
-Half of the schemas contain reordered fields plus realistic billing-email, legacy-company, display-name, and fax distractors. Approval requires an exact match to the disclosed schema truth plus a successful canary transformation. The live model never receives direct write authority; the policy-controlled sync engine retains idempotency, retries, audit logs, and rollback behavior.
-
-## Proof of work
-
-The [committed benchmark](proof/benchmark.json) creates a controlled 1,000-record synchronization scenario:
-
-| Check | Measured result |
-|---|---:|
-| Source records | 1,000 |
-| Existing target records | 500 |
-| Created / updated / unchanged | 500 / 250 / 250 |
-| Synthetic transient failures recovered | 8 |
-| Failures after retries | 0 |
-| Writes during full replay | 0 |
-| Idempotent replay | 100% |
-| Automated tests | 7 passing |
-
-The throughput value in the JSON is a local in-memory measurement; real APIs are network-bound. The meaningful proof is behavioral: injected failures recover, the audit counts reconcile to 1,000, and replay produces no duplicate writes.
-
-### Reproduce the evidence
+Requires Python 3.11 or later.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
-python -m unittest discover -s tests -v
+python -m pip install -e '.[dev]'
 python -m api_sync.cli
-python -m api_sync.benchmark --records 1000
+python -m api_sync.benchmark --records 1000 --output /tmp/sync-benchmark.json
 ```
 
-The demo writes the resulting target state to `output/synced_contacts.json` and a per-record audit log to `output/audit_log.json`.
+## Scope and integration contract
 
-## How it works
+The CLI uses two **in-memory mock APIs** populated from JSON. It writes target state and audit
+files; it does not connect to an external CRM. Implement `ContactAPI` for a real system.
+The target adapter must enforce idempotency durably, including retries after a lost receipt.
+The demo keeps its idempotency log in memory only.
 
-```text
-Paginated source records
-        ↓
-Required-field and email validation
-        ↓
-Normalization + content fingerprint
-        ↓
-Compare with target
-        ├── identical → skip
-        └── changed/new → idempotent upsert → retry transient failures
-                                      ↓
-                                  audit event
+`configure_and_canary_sync` returns an approval/rollback decision for a proposed mapping;
+it does not deploy or roll back a live integration. A structural canary cannot prove every
+field's business meaning. Unknown mappings need representative source data and review.
+
+Optional `suggest_field_mapping` uses `LLM_API_KEY` and optional `LLM_MODEL`/`LLM_API_URL`.
+It validates one-to-one source/target fields. Permanent transport errors propagate rather
+than being mislabeled as transient retries.
+
+## Verification
+
+```bash
+ruff check .
+ruff format --check .
+python -m unittest discover -s tests -v
 ```
 
-### Stage 1 — deterministic core
+CI runs these checks and a fresh deterministic benchmark on Python 3.11 and 3.13.
+Tests include malformed inputs, known regression cases and mocked provider failures.
+No credentials or live model calls are needed for the test suite. Provider responses have
+size limits, JSON-object validation and bounded retries for transient failures.
 
-The engine separates normalization, comparison, mutation, retry handling, and auditing. Idempotency keys combine the external ID with a content fingerprint, making each intended version addressable. Invalid data is rejected before any write.
+## Benchmark evidence
 
-### Stage 2 — autonomous AI integration setup
+All bundled datasets are synthetic. `proof/benchmark.json` records a deterministic demo
+run; it does not establish performance on arbitrary customer data. The older
+`proof/autonomous-benchmark.json`, case JSONL and portfolio image are **historical v1.0.0
+artifacts**, not quality or accuracy guarantees for v1.1.0. Their archive-consistency test
+does not execute the current controller or a live model.
 
-When two systems use unfamiliar field names, AI proposes one canonical `target field -> source field` mapping. The autonomous controller validates it, runs a canary transformation, and promotes or rolls back automatically before the deterministic sync begins.
+Use the current regression suite to verify the current behavior. A fresh live-model
+benchmark is optional and requires a configured Ollama instance; none is implied by a green
+CI result. [Changes and compatibility](CHANGELOG.md).
 
-```python
-from api_sync.ai import suggest_field_mapping
-mapping = suggest_field_mapping(source_fields, target_fields, sample_records)
-```
-
-This keeps AI outside the critical write loop: it helps configure the integration but does not decide whether a record is valid or whether a write succeeded.
-
-## Evidence map
-
-- [`data/mock/`](data/mock/) — labeled source and target contact fixtures
-- [`tests/test_sync.py`](tests/test_sync.py) — create/update/skip, retry, replay, and rejection tests
-- [`proof/benchmark.json`](proof/benchmark.json) — controlled 1,000-record scenario
-- [`proof/autonomous-benchmark.json`](proof/autonomous-benchmark.json) — live-model schema acceptance summary
-- [`proof/autonomous-cases.jsonl`](proof/autonomous-cases.jsonl) — all 200 mapping decisions
-- [`proof/portfolio-card.png`](proof/portfolio-card.png) — portfolio-ready evidence image
-- [GitHub Actions workflow](.github/workflows/ci.yml) — fresh verification on every push
-
-## Production extension points
-
-A production adapter would add real HTTP clients, OAuth/token refresh, vendor rate-limit headers, persistent checkpoints, encrypted secrets, dead-letter handling, monitoring, and the client's conflict-resolution policy.
-
-Built by **Milo Geller** · MIT licensed.
+Built by **Milo Geller** · [MIT licensed](LICENSE).

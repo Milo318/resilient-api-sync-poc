@@ -26,7 +26,14 @@ VARIANTS = [
     ("id", "email", "first_name", "last_name", "company", "phone"),
     ("contact_id", "email_address", "given_name", "surname", "organization", "mobile"),
     ("customer_ref", "mail", "forename", "family_name", "account_name", "telephone"),
-    ("record_key", "primary_email", "contact_first", "contact_last", "employer", "phone_number"),
+    (
+        "record_key",
+        "primary_email",
+        "contact_first",
+        "contact_last",
+        "employer",
+        "phone_number",
+    ),
     ("external_key", "contact_email", "fname", "lname", "business", "contact_phone"),
 ]
 
@@ -38,50 +45,104 @@ def generate_cases(count: int) -> list[SchemaCase]:
         truth = dict(zip(MAPPING_FIELDS, fields))
         challenge = "distractor_fields" if index % 2 else "standard"
         source_fields = list(fields)
-        distractors = {
-            f"billing_email_{index:03d}": "accounts@example.test",
-            f"legacy_company_{index:03d}": "Retired Synthetic GmbH",
-            f"display_name_{index:03d}": "Ignore This Contact",
-            f"fax_number_{index:03d}": "+49-999-000",
-        } if challenge != "standard" else {}
+        distractors = (
+            {
+                f"billing_email_{index:03d}": "accounts@example.test",
+                f"legacy_company_{index:03d}": "Retired Synthetic GmbH",
+                f"display_name_{index:03d}": "Ignore This Contact",
+                f"fax_number_{index:03d}": "+49-999-000",
+            }
+            if challenge != "standard"
+            else {}
+        )
         source_fields.extend(distractors)
         shift = index % len(source_fields)
         source_fields = source_fields[shift:] + source_fields[:shift]
         samples = []
         for item in range(5):
             canonical = {
-                "external_id": f"MOCK-{index:03d}-{item}", "email": f"Person{item}@Example.Test",
-                "first_name": f"Demo{item}", "last_name": "Contact", "company": f"Synthetic Co {index}", "phone": f"+49-000-{index:03d}{item}",
+                "external_id": f"MOCK-{index:03d}-{item}",
+                "email": f"Person{item}@Example.Test",
+                "first_name": f"Demo{item}",
+                "last_name": "Contact",
+                "company": f"Synthetic Co {index}",
+                "phone": f"+49-000-{index:03d}{item}",
             }
             record = {truth[target]: value for target, value in canonical.items()}
             record.update(distractors)
             samples.append(record)
-        cases.append(SchemaCase(f"SCHEMA-{index:03d}", source_fields, samples, truth, challenge))
+        cases.append(
+            SchemaCase(f"SCHEMA-{index:03d}", source_fields, samples, truth, challenge)
+        )
     return cases
 
 
-def ask_ollama(batch: list[SchemaCase], model: str, url: str) -> tuple[dict[str, dict[str, object]], dict[str, int]]:
-    items = [{"case_id": case.case_id, "source_fields": case.source_fields, "sample": case.samples[0]} for case in batch]
+def ask_ollama(
+    batch: list[SchemaCase], model: str, url: str
+) -> tuple[dict[str, dict[str, object]], dict[str, int]]:
+    items = [
+        {
+            "case_id": case.case_id,
+            "source_fields": case.source_fields,
+            "sample": case.samples[0],
+        }
+        for case in batch
+    ]
     prompt = (
         "Map every source schema to canonical CRM fields. Return JSON with results array. Each item needs case_id and mapping. "
-        f"mapping keys must be exactly {list(MAPPING_FIELDS)} and values must be source field names. Do not omit cases.\n\n" + json.dumps(items)
+        f"mapping keys must be exactly {list(MAPPING_FIELDS)} and values must be source field names. Do not omit cases.\n\n"
+        + json.dumps(items)
     )
-    payload = {"model": model, "stream": False, "format": "json", "keep_alive": "10m", "options": {"temperature": 0, "num_predict": 1600}, "messages": [{"role": "system", "content": "You map API schemas precisely. Output JSON only."}, {"role": "user", "content": prompt}]}
-    request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    payload = {
+        "model": model,
+        "stream": False,
+        "format": "json",
+        "keep_alive": "10m",
+        "options": {"temperature": 0, "num_predict": 1600},
+        "messages": [
+            {
+                "role": "system",
+                "content": "You map API schemas precisely. Output JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(request, timeout=180) as response:
         raw = json.load(response)
     parsed = json.loads(raw["message"]["content"])
-    results = parsed.get("results", parsed if isinstance(parsed, list) else [])
-    return {str(item.get("case_id")): item.get("mapping", {}) for item in results if isinstance(item, dict)}, {"prompt_tokens": int(raw.get("prompt_eval_count", 0)), "completion_tokens": int(raw.get("eval_count", 0))}
+    results = (
+        parsed
+        if isinstance(parsed, list)
+        else parsed.get("results", [])
+        if isinstance(parsed, dict)
+        else []
+    )
+    return {
+        str(item.get("case_id")): item.get("mapping", {})
+        for item in results
+        if isinstance(item, dict)
+    }, {
+        "prompt_tokens": int(raw.get("prompt_eval_count", 0)),
+        "completion_tokens": int(raw.get("eval_count", 0)),
+    }
 
 
-def run(count: int, model: str, url: str, batch_size: int) -> tuple[dict[str, object], list[dict[str, object]]]:
+def run(
+    count: int, model: str, url: str, batch_size: int
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    if count < 1 or batch_size < 1:
+        raise ValueError("cases and batch size must be positive")
     cases = generate_cases(count)
     started = time.perf_counter()
     proposals: dict[str, dict[str, object]] = {}
     prompt_tokens = completion_tokens = 0
     for index in range(0, count, batch_size):
-        result, usage = ask_ollama(cases[index:index + batch_size], model, url)
+        result, usage = ask_ollama(cases[index : index + batch_size], model, url)
         proposals.update(result)
         prompt_tokens += usage["prompt_tokens"]
         completion_tokens += usage["completion_tokens"]
@@ -91,29 +152,65 @@ def run(count: int, model: str, url: str, batch_size: int) -> tuple[dict[str, ob
         direct = proposal == case.truth
         outcome = configure_and_canary_sync(case.source_fields, case.samples, proposal)
         correct = outcome.mapping == case.truth
-        rows.append({"case_id": case.case_id, "challenge": case.challenge, "ai_direct_pass": direct, "decision_source": outcome.source, "canary_records": outcome.canary_records, "rollback_required": outcome.rollback_required, "truth_match": correct, "approved": outcome.approved and correct})
+        rows.append(
+            {
+                "case_id": case.case_id,
+                "challenge": case.challenge,
+                "ai_direct_pass": direct,
+                "decision_source": outcome.source,
+                "canary_records": outcome.canary_records,
+                "rollback_required": outcome.rollback_required,
+                "truth_match": correct,
+                "approved": outcome.approved and correct,
+            }
+        )
     elapsed = time.perf_counter() - started
     direct = sum(row["ai_direct_pass"] for row in rows)
     approved = sum(row["approved"] for row in rows)
     stress_rows = [row for row in rows if row["challenge"] != "standard"]
     stress_approved = sum(row["approved"] for row in stress_rows)
     summary = {
-        "benchmark": "autonomous_api_mapping_v2_stress", "live_model": True, "model": model,
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(), "synthetic_data": True,
-        "benchmark_cases": count, "minimum_required_cases": 200,
-        "ai_direct_passed": direct, "ai_direct_pass_rate_percent": round(direct / count * 100, 2),
-        "final_approved": approved, "approval_rate_percent": round(approved / count * 100, 2),
-        "required_approval_rate_percent": 96.0, "acceptance_gate_passed": count >= 200 and approved / count >= 0.96,
-        "manual_approvals_required": 0, "automatic_self_repairs": sum(row["decision_source"] == "deterministic_self_repair" for row in rows),
-        "stress_cases": len(stress_rows), "stress_approved": stress_approved,
-        "stress_approval_rate_percent": round(stress_approved / len(stress_rows) * 100, 2),
+        "benchmark": "autonomous_api_mapping_v2_stress",
+        "live_model": True,
+        "model": model,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "synthetic_data": True,
+        "benchmark_cases": count,
+        "minimum_required_cases": 200,
+        "ai_direct_passed": direct,
+        "ai_direct_pass_rate_percent": round(direct / count * 100, 2),
+        "final_approved": approved,
+        "approval_rate_percent": round(approved / count * 100, 2),
+        "required_approval_rate_percent": 96.0,
+        "acceptance_gate_passed": count >= 200 and approved / count >= 0.96,
+        "manual_approvals_required": 0,
+        "automatic_self_repairs": sum(
+            row["decision_source"] == "deterministic_self_repair" for row in rows
+        ),
+        "stress_cases": len(stress_rows),
+        "stress_approved": stress_approved,
+        "stress_approval_rate_percent": round(
+            stress_approved / len(stress_rows) * 100, 2
+        ),
         "canary_records_validated": sum(int(row["canary_records"]) for row in rows),
         "rollbacks_required": sum(bool(row["rollback_required"]) for row in rows),
-        "elapsed_seconds": round(elapsed, 3), "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-        "case_generator_sha256": sha256(json.dumps([
-            {"source_fields": case.source_fields, "samples": case.samples, "truth": case.truth, "challenge": case.challenge}
-            for case in cases
-        ], sort_keys=True).encode()).hexdigest(),
+        "elapsed_seconds": round(elapsed, 3),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "case_generator_sha256": sha256(
+            json.dumps(
+                [
+                    {
+                        "source_fields": case.source_fields,
+                        "samples": case.samples,
+                        "truth": case.truth,
+                        "challenge": case.challenge,
+                    }
+                    for case in cases
+                ],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
     }
     return summary, rows
 
@@ -124,14 +221,21 @@ def main() -> None:
     parser.add_argument("--model", default="granite4.1:3b")
     parser.add_argument("--url", default="http://localhost:11434/api/chat")
     parser.add_argument("--batch-size", type=int, default=10)
-    parser.add_argument("--output", type=Path, default=Path("proof/autonomous-benchmark.json"))
-    parser.add_argument("--case-output", type=Path, default=Path("proof/autonomous-cases.jsonl"))
+    parser.add_argument(
+        "--output", type=Path, default=Path("proof/autonomous-benchmark.json")
+    )
+    parser.add_argument(
+        "--case-output", type=Path, default=Path("proof/autonomous-cases.jsonl")
+    )
     args = parser.parse_args()
     if args.cases < 200:
         raise SystemExit("At least 200 cases are required")
     summary, rows = run(args.cases, args.model, args.url, args.batch_size)
     args.output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    args.case_output.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    args.case_output.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
     print(json.dumps(summary, indent=2))
     if not summary["acceptance_gate_passed"]:
         raise SystemExit("Acceptance gate failed")
